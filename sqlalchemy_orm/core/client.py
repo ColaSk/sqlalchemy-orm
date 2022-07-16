@@ -1,5 +1,5 @@
 import typing as t
-from sqlalchemy import create_engine
+import sqlalchemy
 from sqlalchemy.orm import Session, scoped_session, sessionmaker, declarative_base
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.engine.url import make_url
@@ -34,7 +34,7 @@ class SQLAlchemyClient(object):
         url: str, 
         query_class: BaseQuery = BaseQuery, 
         session_options: t.Optional[dict] = None,
-        model_class:Model=Model,
+        model_class: Model=Model,
         metadata=None,
         engine_options: t.Optional[dict]=None):
         
@@ -59,16 +59,18 @@ class SQLAlchemyClient(object):
             self.create_session(options), scopefunc=scopefunc
         )
 
-    def make_declarative_base(self, model, metadata=None):        
+    def make_declarative_base(self, model_class, metadata=None):        
 
         model = declarative_base(
-            cls=model,
-            name='Model',
-            metadata=metadata
+            cls=model_class,
+            name='Model'
         )
 
         if metadata is not None and model.metadata is not metadata:
             model.metadata = metadata
+        
+        if not getattr(model, 'query_class', None):
+            model.query_class = self.Query
 
         return model
 
@@ -90,7 +92,14 @@ class SQLAlchemyClient(object):
                 self.connectors[bind] = connector
 
             return connector.get_engine()
+    
+    def get_binds(self):
+        # TODO: 获取多连接
+        return
 
     def make_connector(self, bind=None):
         """Creates the connector for a given state and bind."""
         return _EngineConnector(self, bind)
+
+    def create_engine(self, sa_url, engine_opts):
+        return sqlalchemy.create_engine(sa_url, **engine_opts)
