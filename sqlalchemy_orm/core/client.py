@@ -11,34 +11,20 @@ from .model import Model
 from .session import SignallingSession
 
 
-class _EngineConnector(object):
-
-    def __init__(self, sa, bind=None):
-        self._sa = sa
-        self._engine = None
-        self._connected_for = None
-        self._bind = bind
-        self._lock = Lock()
-
-    def get_uri(self): ...
-
-    def get_engine(self): ...
-
-    def get_options(self, sa_url, echo): ...
-
-
 class SQLAlchemyClient(object):
 
     def __init__(
-        self, 
-        url: str, 
+        self,
+        config: dict,
         query_class: BaseQuery = BaseQuery, 
         session_options: t.Optional[dict] = None,
         model_class: Model=Model,
         metadata=None,
         engine_options: t.Optional[dict]=None):
+
+        self.connectors = {}
         
-        self.url = url
+        self.config = config
         self.Query = query_class
         self.session_options = session_options
         self._engine_option = engine_options
@@ -82,7 +68,6 @@ class SQLAlchemyClient(object):
         return self.get_engine()
 
     def get_engine(self, bind=None):
-        """Returns a specific engine."""
 
         with self._engine_lock:
             connector = self.connectors.get(bind)
@@ -91,11 +76,30 @@ class SQLAlchemyClient(object):
                 connector = self.make_connector(bind)
                 self.connectors[bind] = connector
 
-            return connector.get_engine()
+            return connector[bind]
     
+    def get_tables_for_bind(self, bind=None):
+
+        result = []
+        for table in iter(self.Model.metadata.tables.values()):
+            if table.info.get('bind_key') == bind:
+                result.append(table)
+        return result
+
     def get_binds(self):
-        # TODO: 获取多连接
-        return
+        binds = [None] + list(self.config.get('SQLALCHEMY_BINDS') or ())
+        retval = {}
+        for bind in binds:
+            engine = self.get_engine(bind)
+            tables = self.get_tables_for_bind(bind)
+            retval.update(dict((table, engine) for table in tables))
+        return retval
+    
+    def get_uri(self, bind=None):
+        if bind is None:
+            return self.config['SQLALCHEMY_DATABASE_URI']
+        binds = self.config.get('SQLALCHEMY_BINDS') or ()
+        return binds[bind]
 
     def make_connector(self, bind=None):
         """Creates the connector for a given state and bind."""
