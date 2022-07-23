@@ -11,6 +11,7 @@ from .model import Model
 from .session import SignallingSession
 
 
+# TODO：将被删除
 class SQLAlchemyClient(object):
 
     def __init__(
@@ -103,7 +104,119 @@ class SQLAlchemyClient(object):
 
     def make_connector(self, bind=None):
         """Creates the connector for a given state and bind."""
-        return _EngineConnector(self, bind)
+        uri = self.get_uri(bind)
+        echo = self.config.get('SQLALCHEMY_ECHO', None)
+        sa_url = make_url(uri)
+        sa_url, options = self.get_options(sa_url, echo)
+        engine = self.create_engine(sa_url, options)
+
+        return engine
+
+    def get_options(self, sa_url, echo):
+        options = {}
+
+        options = self.apply_pool_defaults(options)
+        sa_url, options = self.apply_driver_hacks(sa_url, options)
+
+        if echo:
+            options['echo'] = echo
+
+        # Give the config options set by a developer explicitly priority
+        # over decisions FSA makes.
+        options.update(self.config['SQLALCHEMY_ENGINE_OPTIONS'])
+
+        # Give options set in SQLAlchemy.__init__() ultimate priority
+        options.update(self._sa._engine_options)
+
+        return sa_url, options
+
+    def apply_pool_defaults(self, options):
+
+        def _setdefault(optionkey, configkey):
+            value = self.config.get(configkey, None)
+            if value is not None:
+                options[optionkey] = value
+        _setdefault('pool_size', 'SQLALCHEMY_POOL_SIZE')
+        _setdefault('pool_timeout', 'SQLALCHEMY_POOL_TIMEOUT')
+        _setdefault('pool_recycle', 'SQLALCHEMY_POOL_RECYCLE')
+        _setdefault('max_overflow', 'SQLALCHEMY_MAX_OVERFLOW')
+        return options
+
 
     def create_engine(self, sa_url, engine_opts):
         return sqlalchemy.create_engine(sa_url, **engine_opts)
+
+
+# 迁移到此类
+
+class MySQLAlchemy(object):
+
+    """
+    engine:
+    session:
+    model:
+    """
+
+    def __init__(
+        self,
+        config: t.Optional[dict] = None,
+        session_options: t.Optional[dict] = None,
+        engine_options: t.Optional[dict]=None):
+        
+        # 所有连接对象
+        self._connectors = {}
+
+        self._config = config if config else {}
+
+        self._session_options = session_options
+        self._engine_options = engine_options
+
+        self._engine_lock = Lock()
+
+        self.session = self.create_scoped_session(session_options)
+
+    
+    def create_scoped_session(self, options: t.Optional[dict] = None):
+
+        if options is None:
+            options = {}
+
+        scopefunc = options.pop('scopefunc', _ident_func)
+        return scoped_session(
+            self.create_session(options), scopefunc=scopefunc
+        )
+    
+    @property
+    def engine(self):
+        return self.get_engine()
+    
+    def create_session(self, options: dict):
+        return sessionmaker(class_=SignallingSession, db=self, **options)
+
+    def get_binds(self):
+        # 获取多数据库定义
+        return
+
+    def get_engine(self, bind=None):
+
+        with self._engine_lock:
+            connector = self._connectors.get(bind)
+
+            if connector is None:
+                connector = self.make_connector(bind)
+                self._connectors[bind] = connector
+
+            return connector[bind]
+
+    
+    def make_connector(self, bind=None):
+        """Creates the connector for a given state and bind."""
+        uri = self.get_uri(bind)
+        options = {} # TODO：根据url定义具体的options，针对不用数据库options存在支持与不支持的问题
+        engine = self.create_engine(uri, options)
+
+        return engine
+
+    def create_engine(self, sa_url, engine_opts):
+        return sqlalchemy.create_engine(sa_url, **engine_opts)
+    
