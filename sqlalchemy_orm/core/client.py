@@ -174,6 +174,7 @@ class MySQLAlchemy(object):
         self._engine_lock = Lock()
 
         self.session = self.create_scoped_session(session_options)
+        self.Model = self.make_declarative_base()
 
     
     def create_scoped_session(self, options: t.Optional[dict] = None):
@@ -200,23 +201,44 @@ class MySQLAlchemy(object):
     def get_engine(self, bind=None):
 
         with self._engine_lock:
+
             connector = self._connectors.get(bind)
 
             if connector is None:
                 connector = self.make_connector(bind)
                 self._connectors[bind] = connector
 
-            return connector[bind]
+            return connector
+
+    
+    def get_uri(self, bind=None):
+        if bind is None:
+            return self._config['url']
+        binds = self._config.get('SQLALCHEMY_BINDS') or ()
+        return binds[bind]
 
     
     def make_connector(self, bind=None):
         """Creates the connector for a given state and bind."""
         uri = self.get_uri(bind)
-        options = {} # TODO：根据url定义具体的options，针对不用数据库options存在支持与不支持的问题
+        options = {
+            "echo": True
+        } # TODO：根据url定义具体的options，针对不用数据库options存在支持与不支持的问题
         engine = self.create_engine(uri, options)
 
         return engine
 
     def create_engine(self, sa_url, engine_opts):
         return sqlalchemy.create_engine(sa_url, **engine_opts)
+
+    def make_declarative_base(self): 
+
+        model = declarative_base(
+            bind=self.engine,
+            name='Model'
+        )
+
+        return model
+
+
     
