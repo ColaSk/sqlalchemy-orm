@@ -1,4 +1,5 @@
 import typing as t
+import warnings
 import sqlalchemy
 from sqlalchemy.orm import Session, scoped_session, sessionmaker, declarative_base
 from flask_sqlalchemy import SQLAlchemy
@@ -173,8 +174,35 @@ class MySQLAlchemy(object):
 
         self._engine_lock = Lock()
 
+        self.check_config()
+
         self.session = self.create_scoped_session(session_options)
         self.Model = self.make_declarative_base()
+
+    
+    def check_config(self):
+        """check config"""
+        if (
+            'SQLALCHEMY_DATABASE_URI' not in self._config and
+            'SQLALCHEMY_BINDS' not in self._config
+        ):
+            warnings.warn(
+                'Neither SQLALCHEMY_DATABASE_URI nor SQLALCHEMY_BINDS is set. '
+                'Defaulting SQLALCHEMY_DATABASE_URI to "sqlite:///:memory:".'
+            )
+
+        self._config.setdefault('SQLALCHEMY_DATABASE_URI', 'sqlite:///:memory:')
+        self._config.setdefault('SQLALCHEMY_BINDS', None)
+        self._config.setdefault('SQLALCHEMY_NATIVE_UNICODE', None)
+        self._config.setdefault('SQLALCHEMY_ECHO', False)
+        self._config.setdefault('SQLALCHEMY_RECORD_QUERIES', None)
+        self._config.setdefault('SQLALCHEMY_POOL_SIZE', None)
+        self._config.setdefault('SQLALCHEMY_POOL_TIMEOUT', None)
+        self._config.setdefault('SQLALCHEMY_POOL_RECYCLE', None)
+        self._config.setdefault('SQLALCHEMY_MAX_OVERFLOW', None)
+        self._config.setdefault('SQLALCHEMY_COMMIT_ON_TEARDOWN', False)
+        self._config.setdefault('SQLALCHEMY_TRACK_MODIFICATIONS', None)
+        self._config.setdefault('SQLALCHEMY_ENGINE_OPTIONS', {})
 
     
     def create_scoped_session(self, options: t.Optional[dict] = None):
