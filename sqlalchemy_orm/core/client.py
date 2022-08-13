@@ -1,8 +1,9 @@
 import typing as t
 import warnings
 import sqlalchemy
-from sqlalchemy.orm import Session, scoped_session, sessionmaker, declarative_base
+from sqlalchemy.orm import class_mapper, scoped_session, sessionmaker, declarative_base
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm.exc import UnmappedClassError
 from sqlalchemy.engine.url import make_url
 from threading import Lock
 from threading import get_ident as _ident_func
@@ -10,6 +11,18 @@ from threading import get_ident as _ident_func
 from .query import BaseQuery
 from .model import Model
 from .session import SignallingSession
+
+class _QueryProperty(object):
+    def __init__(self, sa):
+        self.sa = sa
+
+    def __get__(self, obj, type):
+        try:
+            mapper = class_mapper(type)
+            if mapper:
+                return type.query_class(mapper, session=self.sa.session())
+        except UnmappedClassError:
+            return None
 
 
 class MySQLAlchemy(object):
@@ -34,7 +47,7 @@ class MySQLAlchemy(object):
 
         self._config = config or {}
         self._session_options = session_options
-        self._engine_options = engine_options
+        self._engine_options = engine_options or {}
         self.Query = query_class
         self.model_class = model_class
         self.metadata = metadata
@@ -201,8 +214,40 @@ class MySQLAlchemy(object):
         if not getattr(model, 'query_class', None):
             model.query_class = self.Query
 
+        model.query = _QueryProperty(self)
+
         return model
 
+    def _execute_for_all_tables(self, bind, operation, skip_tables=False):
+       
+        if bind == '__all__':
+            binds = [None] + list(self._config.get('SQLALCHEMY_BINDS') or ())
+        elif isinstance(bind, str) or bind is None:
+            binds = [bind]
+        else:
+            binds = bind
 
+        for bind in binds:
+            extra = {}
+            if not skip_tables:
+                tables = self.get_tables_for_bind(bind)
+                extra['tables'] = tables
+            op = getattr(self.Model.metadata, operation)
+            op(bind=self.get_engine(bind), **extra)
 
+    def create_all(self, bind='__all__'):
+        """Creates all tables.
+
+        .. versionchanged:: 0.12
+           Parameters were added
+        """
+        self._execute_for_all_tables(bind, 'create_all')
+
+    def drop_all(self, bind='__all__'):
+        """Drops all tables.
+
+        .. versionchanged:: 0.12
+           Parameters were added
+        """
+        self._execute_for_all_tables(bind, 'drop_all')
     
